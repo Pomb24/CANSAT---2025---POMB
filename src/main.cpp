@@ -11,6 +11,7 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
+#include <SimpleKalmanFilter.h>
 
 #define LED_PIN      PC13
 #define SD_CS_PIN    PB12
@@ -33,12 +34,16 @@ MQUnifiedsensor MQ135(placa, Voltage_Resolution, ADC_Bit_Resolution, pin, type);
 MPU6050 mpu(Wire);
 
 TinyGPSPlus gps;
-HardwareSerial Serial1(PA10, PA9);
+HardwareSerial Gps_Serial(PA10, PA9);
 
 GyverBME280 bme;
 
-HardwareSerial Serial2(PA3, PA2);
-LoRa_E32 e32ttl(&Serial2, PA0, PB0, PB10);
+HardwareSerial Lora(PA3, PA2);
+LoRa_E32 e32ttl(&Lora, PA0, PB0, PB10);
+
+SimpleKalmanFilter kalmanFilterX(2, 2, 0.01); // Q, R, và F
+SimpleKalmanFilter kalmanFilterY(2, 2, 0.01);
+SimpleKalmanFilter kalmanFilterZ(2, 2, 0.01);
 
 bool sensorOK = false;
 
@@ -105,7 +110,7 @@ void saveDataToSD(String data) {
 void setup()
 {
   Serial.begin(9600);
-  Serial1.begin(9600);
+  Gps_Serial.begin(9600);
   while (!Serial) {;}
   Wire.begin();
 
@@ -156,13 +161,16 @@ void loop()
   unsigned long currentTime = millis();
 
   mpu.update(); // Update MPU6050 data
+  float accX = kalmanFilterX.updateEstimate(mpu.getAccX());
+  float accY = kalmanFilterY.updateEstimate(mpu.getAccY());
+  float accZ = kalmanFilterZ.updateEstimate(mpu.getAccZ());
 
   sensors_event_t event;
   dht.temperature().getEvent(&event);
   dht.humidity().getEvent(&event);
 
-  while (Serial1.available()) {
-    char c = Serial1.read();  // Đọc dữ liệu từ GPS
+  while (Gps_Serial.available()) {
+    char c = Gps_Serial.read();  // Đọc dữ liệu từ GPS
     gps.encode(c);   // Đưa dữ liệu vào parser
   }
 
@@ -196,7 +204,7 @@ void loop()
     payload += String(gps.location.lng(), 4) + ","; // GPS_LONGITUDE
     payload += String(gps.altitude.meters(), 1) + ","; // GPS_ALTITUDE
     payload += String(gps.satellites.value()) + ","; // GPS_SATS
-    payload += String(mpu.getAccX(), 2) + "," + String(mpu.getAccY(), 2) + "," + String(mpu.getAccZ(), 2) + ","; // ACC_X, ACC_Y, ACC_Z
+    payload += String(accX, 2) + "," + String(accY, 2) + "," + String(accZ, 2) + ","; // ACC_X, ACC_Y, ACC_Z
     payload += String(mpu.getGyroX(), 2) + "," + String(mpu.getGyroY(), 2) + "," + String(mpu.getGyroZ(), 2) + ","; // GYO_X, GYO_Y, GYO_Z
     payload += String(pressure, 2) + ","; // PRESS
     payload += String(hum, 2) + ","; // HUMI
