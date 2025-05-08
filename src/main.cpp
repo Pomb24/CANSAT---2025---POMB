@@ -91,6 +91,17 @@ void blinkError(int onTime, int offTime, int count) {
   }
 }
 
+void saveDataToSD(String data) {
+  File dataFile = SD.open("data.csv", FILE_WRITE);
+  if (dataFile) {
+    dataFile.println(data); // Ghi dữ liệu vào file
+    dataFile.close();
+    Serial.println("Dữ liệu đã được lưu vào data.csv");
+  } else {
+    Serial.println("Không thể mở file data.csv để ghi!");
+  }
+}
+
 void setup()
 {
   Serial.begin(9600);
@@ -169,21 +180,31 @@ void loop()
   if (currentTime - lastDataTime >= samplingInterval) {
     lastDataTime = currentTime;
 
-    // Tạo chuỗi dữ liệu để gửi qua LoRa
-    String dataString = "Altitude: " + String(altitude) + " m\n" +
-                        "Temperature: " + String(temperature) + " *C\n" +
-                        "Humidity: " + String(hum) + " %\n" +
-                        "Pressure: " + String(pressure) + " Pa\n";
+    MQ135.update(); // Cập nhật giá trị cảm biến
+    float coConcentration = MQ135.readSensor(); // Đọc nồng độ CO (ppm)
 
-    if (gps.location.isUpdated()) {
-      dataString += "Latitude: " + String(gps.location.lat(), 6) + "\n";
-      dataString += "Longitude: " + String(gps.location.lng(), 6) + "\n";
-    }
+    String teamID = "TEAM_01";
+    String msgID = "MSG_001";
+    String payload = "";
 
-    dataString += "ACCELERO  X: " + String(mpu.getAccX()) + " Y: " + String(mpu.getAccY()) + " Z: " + String(mpu.getAccZ()) + "\n";
-    dataString += "GYRO      X: " + String(mpu.getGyroX()) + " Y: " + String(mpu.getGyroY()) + " Z: " + String(mpu.getGyroZ()) + "\n";
+    payload += String(millis()) + ","; // TIME
+    payload += String(altitude, 1) + ","; // ALTITUDE
+    payload += String(temperature, 2) + ","; // TEMP
+    payload += "12.5,"; // VOLTAGE (giả định giá trị)
+    payload += String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second()) + ","; // GPS_TIME
+    payload += String(gps.location.lat(), 4) + ","; // GPS_LATITUDE
+    payload += String(gps.location.lng(), 4) + ","; // GPS_LONGITUDE
+    payload += String(gps.altitude.meters(), 1) + ","; // GPS_ALTITUDE
+    payload += String(gps.satellites.value()) + ","; // GPS_SATS
+    payload += String(mpu.getAccX(), 2) + "," + String(mpu.getAccY(), 2) + "," + String(mpu.getAccZ(), 2) + ","; // ACC_X, ACC_Y, ACC_Z
+    payload += String(mpu.getGyroX(), 2) + "," + String(mpu.getGyroY(), 2) + "," + String(mpu.getGyroZ(), 2) + ","; // GYO_X, GYO_Y, GYO_Z
+    payload += String(pressure, 2) + ","; // PRESS
+    payload += String(hum, 2) + ","; // HUMI
+    payload += String(coConcentration, 2) + ","; // CO
+    payload += String(readDustDensity(), 2); // PM
 
-    // Gửi dữ liệu qua LoRa
+    String dataString = teamID + "," + String(payload.length()) + "," + msgID + "," + payload + ",ID_END";
+
     ResponseStatus rs = e32ttl.sendMessage(dataString);
     if (rs.code == 1) {
       Serial.println("Dữ liệu đã được gửi qua LoRa thành công!");
@@ -191,6 +212,9 @@ void loop()
       Serial.print("Lỗi khi gửi dữ liệu qua LoRa: ");
       Serial.println(rs.getResponseDescription());
     }
+
+    // Lưu dữ liệu vào file CSV
+    saveDataToSD(dataString);
 
     // Xuất dữ liệu qua Serial Monitor
     Serial.println(dataString);
