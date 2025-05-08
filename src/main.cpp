@@ -6,6 +6,7 @@
 #include <MQUnifiedsensor.h>
 #include <GyverBME280.h>
 #include <TinyGPS++.h>
+#include "LoRa_E32.h"
 #include <SoftwareSerial.h>
 #include <Wire.h>
 #include <SPI.h>
@@ -32,9 +33,13 @@ MQUnifiedsensor MQ135(placa, Voltage_Resolution, ADC_Bit_Resolution, pin, type);
 MPU6050 mpu(Wire);
 
 TinyGPSPlus gps;
-HardwareSerial Serial2(PA3, PA2);
+HardwareSerial Serial1(PA10, PA9);
 
 GyverBME280 bme;
+
+HardwareSerial Serial2(PA3, PA2);
+LoRa_E32 e32ttl(&Serial2, PA0, PB0, PB10);
+
 bool sensorOK = false;
 
 bool sdCardOK = false;
@@ -88,8 +93,9 @@ void blinkError(int onTime, int offTime, int count) {
 
 void setup()
 {
-  Serial.begin(115200);
-  Serial2.begin(9600);
+  Serial.begin(9600);
+  Serial1.begin(9600);
+  while (!Serial) {;}
   Wire.begin();
 
   pinMode(LED_PIN, OUTPUT);
@@ -126,6 +132,12 @@ void setup()
   byte status = mpu.begin();
   while(status!=0){};
   mpu.calcOffsets(true,true);
+
+  e32ttl.begin();
+
+  #ifdef SEND_WAKE_UP_MESSAGE
+    e32ttl.setMode(MODE_1_WAKE_UP);
+  #endif
 }
 
 void loop()
@@ -138,8 +150,8 @@ void loop()
   dht.temperature().getEvent(&event);
   dht.humidity().getEvent(&event);
 
-  while (Serial2.available()) {
-    char c = Serial2.read();  // Đọc dữ liệu từ GPS
+  while (Serial1.available()) {
+    char c = Serial1.read();  // Đọc dữ liệu từ GPS
     gps.encode(c);   // Đưa dữ liệu vào parser
   }
 
@@ -148,7 +160,7 @@ void loop()
   float hum = bme.readHumidity();
   float altitude = calculateAltitude(pressure);
 
-  if(temperature == 0 && hum == 0 && pressure == 0) {
+  if (temperature == 0 && hum == 0 && pressure == 0) {
     Serial.println("Cảm biến mất kết nối!");
     sensorOK = false;
     return;
@@ -157,61 +169,30 @@ void loop()
   if (currentTime - lastDataTime >= samplingInterval) {
     lastDataTime = currentTime;
 
-    Serial.print("Altitude: ");
-    Serial.print(altitude);
-    Serial.println(" m");
-
-    Serial.print("Temperature: ");
-    Serial.print(bme.readTemperature());      
-    Serial.println(" *C");
-
-    Serial.print("Humidity: ");
-    Serial.print(bme.readHumidity());
-    Serial.println(" %");
-    Serial.println("------------------------");
+    // Tạo chuỗi dữ liệu để gửi qua LoRa
+    String dataString = "Altitude: " + String(altitude) + " m\n" +
+                        "Temperature: " + String(temperature) + " *C\n" +
+                        "Humidity: " + String(hum) + " %\n" +
+                        "Pressure: " + String(pressure) + " Pa\n";
 
     if (gps.location.isUpdated()) {
-      Serial.println("\n✅ Tọa độ mới:");
-      Serial.print("Latitude: ");
-      Serial.println(gps.location.lat(), 6);
-      Serial.print("Longitude: ");
-      Serial.println(gps.location.lng(), 6);
-      Serial.print("Valid: ");
-      Serial.print(gps.location.isValid());
-      Serial.print("  Updated: ");
-      Serial.println(gps.location.isUpdated());
+      dataString += "Latitude: " + String(gps.location.lat(), 6) + "\n";
+      dataString += "Longitude: " + String(gps.location.lng(), 6) + "\n";
     }
 
-    Serial.print(F("ACCELERO  X: "));Serial.print(mpu.getAccX());
-    Serial.print("\tY: ");Serial.print(mpu.getAccY());
-    Serial.print("\tZ: ");Serial.println(mpu.getAccZ());
-  
-    Serial.print(F("GYRO      X: "));Serial.print(mpu.getGyroX());
-    Serial.print("\tY: ");Serial.print(mpu.getGyroY());
-    Serial.print("\tZ: ");Serial.println(mpu.getGyroZ());
-  
-    Serial.print(F("ACC ANGLE X: "));Serial.print(mpu.getAccAngleX());
-    Serial.print("\tY: ");Serial.println(mpu.getAccAngleY());
-    
-    Serial.print(F("ANGLE     X: "));Serial.print(mpu.getAngleX());
-    Serial.print("\tY: ");Serial.print(mpu.getAngleY());
-    Serial.print("\tZ: ");Serial.println(mpu.getAngleZ());
-    Serial.println(F("=====================================================\n"));
+    dataString += "ACCELERO  X: " + String(mpu.getAccX()) + " Y: " + String(mpu.getAccY()) + " Z: " + String(mpu.getAccZ()) + "\n";
+    dataString += "GYRO      X: " + String(mpu.getGyroX()) + " Y: " + String(mpu.getGyroY()) + " Z: " + String(mpu.getGyroZ()) + "\n";
 
-    Serial.print("Pressure: ");
-    Serial.print(pressure);
-    Serial.println(" Pa");
+    // Gửi dữ liệu qua LoRa
+    ResponseStatus rs = e32ttl.sendMessage(dataString);
+    if (rs.code == 1) {
+      Serial.println("Dữ liệu đã được gửi qua LoRa thành công!");
+    } else {
+      Serial.print("Lỗi khi gửi dữ liệu qua LoRa: ");
+      Serial.println(rs.getResponseDescription());
+    }
 
-    Serial.print(F("Humidity: "));
-    Serial.print(event.relative_humidity);
-    Serial.println(F("%"));
-
-    MQ135.update();
-    MQ135.readSensor();
-    MQ135.serialDebug();
-
-    float dustDensity = readDustDensity();
-    Serial.print(dustDensity, 2);
-    Serial.println();
+    // Xuất dữ liệu qua Serial Monitor
+    Serial.println(dataString);
   }
 }
