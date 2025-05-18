@@ -102,7 +102,7 @@ void saveDataToSD(String data) {
   File dataFile = SD.open("data.csv", FILE_WRITE);
   if (dataFile) {
     if (newFile) {
-      dataFile.println("TEAM_ID,LENGTH,MSG_ID,TIME,ALTITUDE,TEMP,GPS_TIME,GPS_LAT,GPS_LONG,GPS_ALT,GPS_SAT,ACC_X,ACC_Y,ACC_Z,GYO_X,GYO_Y,GYO_Z,PRESS,HUMI,CO,PM");
+      dataFile.println("TEAM_ID,LEN,MSG_ID,TIME,ALTITUDE,TEMP,GPS_TIME,GPS_LAT,GPS_LONG,GPS_ALT,GPS_SAT,ACC_X,ACC_Y,ACC_Z,GYO_X,GYO_Y,GYO_Z,PRESS,HUMI,CO,PM");
     }
     dataFile.println(data);
     dataFile.close();
@@ -212,7 +212,7 @@ void loop()
     // Payload CSV-style
     String dataString = "";
     dataString += teamID + ",";
-    dataString += String(123) + ",";
+    dataString += String(18) + ",";
     dataString += msgID + ",";
     dataString += String(millis()) + ",";
     dataString += String(altitude, 1) + ",";
