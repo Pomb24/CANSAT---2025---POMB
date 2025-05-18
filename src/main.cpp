@@ -97,9 +97,14 @@ void blinkError(int onTime, int offTime, int count) {
 }
 
 void saveDataToSD(String data) {
+  bool newFile = !SD.exists("data.csv");
+
   File dataFile = SD.open("data.csv", FILE_WRITE);
   if (dataFile) {
-    dataFile.println(data); // Ghi dữ liệu vào file
+    if (newFile) {
+      dataFile.println("TEAM_ID,LENGTH,MSG_ID,TIME,ALTITUDE,TEMP,GPS_TIME,GPS_LAT,GPS_LONG,GPS_ALT,GPS_SAT,ACC_X,ACC_Y,ACC_Z,GYO_X,GYO_Y,GYO_Z,PRESS,HUMI,CO,PM");
+    }
+    dataFile.println(data);
     dataFile.close();
     Serial.println("Dữ liệu đã được lưu vào data.csv");
   } else {
@@ -174,8 +179,8 @@ void loop()
     gps.encode(c);   // Đưa dữ liệu vào parser
   }
 
-  float pressure = bme.readPressure(); // Đọc áp suất từ BME280 (Pa)
-  float temperature = bme.readTemperature(); // Đọc nhiệt độ từ BME280 (°C)
+  float pressure = bme.readPressure(); // (Pa)
+  float temperature = bme.readTemperature(); // (°C)
   float hum = bme.readHumidity();
   float altitude = calculateAltitude(pressure);
 
@@ -190,29 +195,38 @@ void loop()
 
     MQ135.update(); // Cập nhật giá trị cảm biến
     float coConcentration = MQ135.readSensor(); // Đọc nồng độ CO (ppm)
+    float dust = readDustDensity(); // Đọc bụi mịn
 
+    // Định danh
+    static int messageCounter = 1;
     String teamID = "TEAM_01";
-    String msgID = "MSG_001";
-    String payload = "";
+    String msgID = String(messageCounter++);
 
-    payload += String(millis()) + ","; // TIME
-    payload += String(altitude, 1) + ","; // ALTITUDE
-    payload += String(temperature, 2) + ","; // TEMP
-    payload += "12.5,"; // VOLTAGE (giả định giá trị)
-    payload += String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second()) + ","; // GPS_TIME
-    payload += String(gps.location.lat(), 4) + ","; // GPS_LATITUDE
-    payload += String(gps.location.lng(), 4) + ","; // GPS_LONGITUDE
-    payload += String(gps.altitude.meters(), 1) + ","; // GPS_ALTITUDE
-    payload += String(gps.satellites.value()) + ","; // GPS_SATS
-    payload += String(accX, 2) + "," + String(accY, 2) + "," + String(accZ, 2) + ","; // ACC_X, ACC_Y, ACC_Z
-    payload += String(mpu.getGyroX(), 2) + "," + String(mpu.getGyroY(), 2) + "," + String(mpu.getGyroZ(), 2) + ","; // GYO_X, GYO_Y, GYO_Z
-    payload += String(pressure, 2) + ","; // PRESS
-    payload += String(hum, 2) + ","; // HUMI
-    payload += String(coConcentration, 2) + ","; // CO
-    payload += String(readDustDensity(), 2); // PM
+    // GPS data an toàn
+    String gpsTime = String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second());
+    String lat = gps.location.isValid() ? String(gps.location.lat(), 4) : "0.0000";
+    String lng = gps.location.isValid() ? String(gps.location.lng(), 4) : "0.0000";
+    String gpsAlt = gps.altitude.isValid() ? String(gps.altitude.meters(), 1) : "0.0";
+    String gpsSats = gps.satellites.isValid() ? String(gps.satellites.value()) : "0";
 
-    String dataString = teamID + "," + String(payload.length()) + "," + msgID + "," + payload + ",ID_END";
+    // Payload CSV-style
+    String dataString = "";
+    dataString += teamID + ",";
+    dataString += String(123) + ",";
+    dataString += msgID + ",";
+    dataString += String(millis()) + ",";
+    dataString += String(altitude, 1) + ",";
+    dataString += String(temperature, 2) + ",";
+    dataString += gpsTime + ",";
+    dataString += lat + "," + lng + "," + gpsAlt + "," + gpsSats + ",";
+    dataString += String(accX, 2) + "," + String(accY, 2) + "," + String(accZ, 2) + ",";
+    dataString += String(mpu.getGyroX(), 2) + "," + String(mpu.getGyroY(), 2) + "," + String(mpu.getGyroZ(), 2) + ",";
+    dataString += String(pressure, 2) + ",";
+    dataString += String(hum, 2) + ",";
+    dataString += String(coConcentration, 2) + ",";
+    dataString += String(dust, 2) + ",";
 
+    // Gửi qua LoRa
     ResponseStatus rs = e32ttl.sendMessage(dataString);
     if (rs.code == 1) {
       Serial.println("Dữ liệu đã được gửi qua LoRa thành công!");
@@ -221,10 +235,10 @@ void loop()
       Serial.println(rs.getResponseDescription());
     }
 
-    // Lưu dữ liệu vào file CSV
+    // Lưu vào thẻ nhớ
     saveDataToSD(dataString);
 
-    // Xuất dữ liệu qua Serial Monitor
+    // In ra Serial
     Serial.println(dataString);
   }
 }
